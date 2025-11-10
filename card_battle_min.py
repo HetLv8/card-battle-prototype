@@ -7,7 +7,7 @@ Minimal CLI Card Battle Prototype for VSCode
 🎯 Goal: 基本的なターン制カード戦闘の実装
 💻 Run in Terminal:  main.py
 """
-
+"""
 from dataclasses import dataclass
 from typing import List, Optional
 import random
@@ -24,7 +24,7 @@ class Card:
     card_type: str  # 'attack' or 'block'
 
     def play(self, caster: "Actor", target: "Actor", battle: "BattleManager") -> str:
-        """カードの効果を適用"""
+        #カードの効果を適用
         if caster.energy < self.cost:
             return f"⚠ エナジー不足: {self.name} は使用できません (必要{self.cost}, 残り{caster.energy})"
 
@@ -44,7 +44,9 @@ class Card:
 
 
 # ----------------------
-# Actor Base Class
+# Actor Base Class 基本値の初期化、ダメージ判定、死亡判定
+# ↓
+# Player/Enemy
 # ----------------------
 class Actor:
     def __init__(self, name: str, max_hp: int):
@@ -59,7 +61,7 @@ class Actor:
         self.energy = energy
 
     def take_damage(self, amount: int) -> int:
-        """ブロック考慮付きのダメージ計算"""
+        #ブロック考慮付きのダメージ計算
         blocked = min(self.block, amount)
         self.block -= blocked
         actual = max(0, amount - blocked)
@@ -71,7 +73,8 @@ class Actor:
 
 
 # ----------------------
-# Player / Enemy
+# Player　山札・手札・捨て札、ドロー、手札廃棄
+# Enemy　 
 # ----------------------
 class Player(Actor):
     def __init__(self, name: str, max_hp: int, deck: List[Card]):
@@ -225,3 +228,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+"""
