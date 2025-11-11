@@ -4,11 +4,10 @@ from model import Player, Enemy
 from deck import DeckState
 from battle import BattleManager
 from battle import make_card  # 既存のカード生成ファクトリ想定
+from starter_decks import make_starter_deck
 
-def make_starter_deck():
-    # 最小スターター（例）：足軽×5 / 侍シールド×5
-    return [make_card("ASHIGARU_STRIKE") for _ in range(5)] + \
-           [make_card("SAMURAI_SHIELD") for _ in range(5)]
+def make_starter_deck_local():
+    return make_starter_deck("HIDEYOSHI")
 
 def make_enemy_deck():
     # v1.10：攻撃/防御を適当に
