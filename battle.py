@@ -1,51 +1,18 @@
 # battle.py
-
-from dataclasses import dataclass
-from typing import List, Optional
-
-# カードデータ構造
-@dataclass
-class Card:
-    spec_id: str
-    name: str
-    card_type: str  # "attack", "defense" など
-    cost: int
-    power: int
-    tags: List[str] = None
-
-
-# ここが簡易版 make_card
-def make_card(spec_id: str) -> Card:
-    """
-    カードIDを受け取り、最低限のCardインスタンスを返す。
-    data.py がなくても動くフォールバック仕様。
-    """
-    # IDに応じて仮データを返す（あとでdata.py連携する）
-    presets = {
-        "ASHIGARU_STRIKE": {"name": "足軽：打ち込み", "type": "attack", "cost": 1, "power": 7},
-        "SAMURAI_SHIELD": {"name": "侍：守勢", "type": "defense", "cost": 1, "power": 5},
-    }
-    base = presets.get(spec_id, {"name": spec_id, "type": "attack", "cost": 1, "power": 6})
-    return Card(
-        spec_id=spec_id,
-        name=base["name"],
-        card_type=base["type"],
-        cost=base["cost"],
-        power=base["power"],
-        tags=[]
-    )
-
+from typing import Optional
+from battle_deck import BattleDeck
+from model import CardInstance
 
 class BattleManager:
     """
-    戦闘状態と進行管理。
-    - ターン開始/終了
-    - カード解決（最小セット）
-    - 敵の簡易行動
-    - 時限バフ（ターンで減衰→0で削除）
+    戦闘進行管理（v1.10最小版）
+    - BattleDeckと連動（draw/discardを直接使用）
+    - 特殊効果は S1 / S2 / H2 のみ内蔵
+    - それ以外は card_type によるデフォルト挙動
     """
 
-    def __init__(self, player, enemy, pdeck, edeck, *, max_energy: int = 3, hand_size: int = 5):
+    def __init__(self, player, enemy, pdeck: BattleDeck, edeck: BattleDeck,
+                 *, max_energy: int = 3, hand_size: int = 5):
         self.player = player
         self.enemy = enemy
         self.pdeck = pdeck
@@ -53,16 +20,16 @@ class BattleManager:
         self.turn = 1
         self.max_energy = max_energy
         self.hand_size = hand_size
-        self.temp_buffs = {"player": {}, "enemy": {}}
+        self.temp_buffs = {"player": {}, "enemy": {}}  # { name: {value, duration} }
         self.logger = print
         setattr(self.player, "battle", self)
         setattr(self.enemy, "battle", self)
-    def _akey(self, actor):
-            return "player" if actor is self.player else "enemy"
-        
-        
-    # ========= 戦闘/ターン進行 =========
 
+    # ---- internal helpers ----
+    def _akey(self, actor): return "player" if actor is self.player else "enemy"
+    def _peer(self, actor): return self.enemy if actor is self.player else self.player
+
+    # ========= 戦闘/ターン進行 =========
     def start_battle(self) -> int:
         self.logger(f"=== ⚔️  戦闘開始: {self.player.name} vs {self.enemy.name} ===")
         self.player.block = 0
@@ -71,30 +38,27 @@ class BattleManager:
         self._draw_player_to(self.hand_size)
         self._draw_enemy_to(self.hand_size)
         return self.turn
-    
+
     def start_turn(self):
         self.logger(f"\n=== 🧭 ターン {self.turn} 開始 ===")
-        # ブロック持ち越し無し
+        # v1.10：ブロック持ち越しなし・エナジー補充
         self.player.block = 0
         self.enemy.block = 0
-        # エナジー補充
         self.player.energy = self.max_energy
-        # 時限バフ減衰/削除
+        # バフ減衰
         self._decrement_temp_buffs()
-        # ドローして手札を規定枚数へ
+        # 手札補充
         self._draw_player_to(self.hand_size)
 
     def end_turn(self):
         self.logger(f"=== 🔚 ターン {self.turn} 終了 ===")
         self.turn += 1
 
-    # ========= プレイヤーのカードプレイ =========
-
+    # ========= プレイヤー行動 =========
     def play_player_card(self, idx: int) -> str:
         if idx < 0 or idx >= len(self.pdeck.hand):
             return "⚠ 無効な番号です。"
-        card = self.pdeck.hand[idx]
-        # コスト
+        card: CardInstance = self.pdeck.hand[idx]
         cost = self._effective_cost(self.player, card)
         if self.player.energy < cost:
             return f"⚠ エナジー不足（必要:{cost}, 残り:{self.player.energy}）"
@@ -107,12 +71,9 @@ class BattleManager:
         self._discard(self.pdeck, card)
         return log
 
-    # ========= 敵行動（要全面工事） =========
-
+    # ========= 敵行動（簡易AI：攻撃優先→防御） =========
     def enemy_act(self) -> str:
-        # 手札補充（簡易）
         self._draw_enemy_to(self.hand_size)
-        # 攻撃優先→防御
         attack_idx = self._find_first_by_type(self.edeck.hand, "attack")
         defense_idx = self._find_first_by_type(self.edeck.hand, "defense")
         if attack_idx is None and defense_idx is None:
@@ -124,84 +85,88 @@ class BattleManager:
         return f"▶ 敵行動：{log}"
 
     # ========= 勝敗判定 =========
-
     def is_battle_over(self):
-        if self.player.hp <= 0 and self.enemy.hp <= 0:
-            return True, "相打ちだ…"
-        if self.player.hp <= 0:
-            return True, "敗北…"
-        if self.enemy.hp <= 0:
-            return True, "勝利！"
+        if self.player.hp <= 0 and self.enemy.hp <= 0: return True, "相打ちだ…"
+        if self.player.hp <= 0: return True, "敗北…"
+        if self.enemy.hp <= 0: return True, "勝利！"
         return False, ""
 
-    # ========= 効果解決（要全面工事） =========
-
-    def _resolve_card_effect(self, card, *, user, target) -> str:
-        ctype = getattr(card, "card_type", None) or getattr(card, "type", None)
+    # ========= 効果解決（S1/S2/H2のみ内蔵） =========
+    def _resolve_card_effect(self, card: CardInstance, *, user, target) -> str:
+        """
+        v1.10：card_effects なし。
+        - S1: 基本防御（バフ考慮）
+        - S2: 反撃突き（Blockの20%を追加・消費なし）
+        - H2: 逆襲の構え（Blockの半分を消費して追加）
+        - それ以外：card_type によるデフォルト挙動
+        """
+        cid   = getattr(card, "spec_id", "?")
+        ctype = getattr(card, "card_type", "")
         power = getattr(card, "power", 0)
-        name = getattr(card, "spec_id", getattr(card, "name", "???"))
-        tags = getattr(card, "tags", []) or []
 
-        # 例：戦術カード：足軽大将（号令） → このターン足軽パワー+X
-        if name in ("TC_ASHIGARU_COMMANDER", "足軽大将：号令"):
-            bonus = power if power else 2
-            self.add_temp_buff(user, "ashigaru_power_bonus", bonus, duration=1)
-            return f"{user.name} は『{name}』で足軽を鼓舞（このターン+{bonus})！"
-        
-        if name in ("TC_DEF_FORMATION", "戦術：防陣"):
-            bonus = power if power else 3
-            self.add_temp_buff(user, "defense_up_this_turn", bonus, duration=1)
-            return f"{user.name} は『{name}』を展開（このターン 防御+{bonus})！"
-        
-        if ctype == "attack":
-            # 足軽タグなら号令ボーナスを乗せる
-            atk_bonus = 0
-            if "足軽" in tags:
-                atk_bonus = self.get_temp_buff_value(user, "ashigaru_power_bonus")
-            dmg = power + atk_bonus
+        # --- 特殊効果 ---
+        if cid == "S1":
+            gain = power + self.get_temp_buff_value(user, "defense_plus_this_turn")
+            user.block += gain
+            return f"{user.name} は防御（Block +{gain}）"
+
+        if cid == "S2":
+            extra = int(user.block * 0.20)
+            dmg = power + extra
             dealt = target.take_damage(dmg)
-            return f"{user.name} の『{name}』→ {target.name} に {dealt} ダメージ（+{atk_bonus}）"
+            return f"{user.name} の反撃突き → {target.name} に {dealt} ダメージ（+{extra}）"
+
+        if cid == "H2":
+            extra = user.block // 2
+            if extra > 0:
+                user.block -= extra
+            dmg = power + extra
+            dealt = target.take_damage(dmg)
+            return f"{user.name} の逆襲の構え → {target.name} に {dealt} ダメージ（消費:{extra}）"
+
+        # --- デフォルト挙動 ---
+        if ctype == "attack":
+            dealt = target.take_damage(power)
+            return f"{user.name} の攻撃 → {target.name} に {dealt} ダメージ"
 
         if ctype == "defense":
-            def_bonus = self.get_temp_buff_value(user, "defense_up_this_turn")
-            gain = power + def_bonus
+            gain = power + self.get_temp_buff_value(user, "defense_plus_this_turn")
             user.block += gain
-            return f"{user.name} の『{name}』→ ブロック {gain} 獲得（+{def_bonus}）"
+            return f"{user.name} は防御（Block +{gain}）"
 
         if ctype == "skill":
-            return f"{user.name} は『{name}』を使用した。"
+            return f"{user.name} はスキルを使用した。"
 
-        return f"{user.name} は『{name}』を使った（未定義）"
+        return f"{user.name} はカードを使用した。"
 
-# ========= 時限バフ =========
+    # ========= 一時バフ =========
+    def add_temp_buff(self, actor, name: str, value: int, duration: int = 1):
+        k = self._akey(actor)
+        buffs = self.temp_buffs.setdefault(k, {})
+        buffs[name] = {"value": value, "duration": duration}
+        self.logger(f"🟢 {actor.name} に {name}+{value}（{duration}T）")
 
-def add_temp_buff(self, actor, name: str, value: int, duration: int = 1):
-    k = self._akey(actor)
-    buffs = self.temp_buffs.setdefault(k, {})
-    buffs[name] = {"value": value, "duration": duration}
-    self.logger(f"🟢 {actor.name} に {name}+{value}（{duration}T）")
+    def get_temp_buff_value(self, actor, name: str) -> int:
+        k = self._akey(actor)
+        return self.temp_buffs.get(k, {}).get(name, {}).get("value", 0)
 
-def get_temp_buff_value(self, actor, name: str) -> int:
-    k = self._akey(actor)
-    buffs = self.temp_buffs.get(k, {})
-    return buffs.get(name, {}).get("value", 0)
+    def clear_temp_buff(self, actor, name: str):
+        k = self._akey(actor)
+        self.temp_buffs.get(k, {}).pop(name, None)
 
-def _decrement_temp_buffs(self):
-    for k, buffs in self.temp_buffs.items():
-        expired = []
-        for name, info in buffs.items():
-            info["duration"] -= 1
-            if info["duration"] <= 0:
-                expired.append(name)
-        for name in expired:
-            # k は "player"/"enemy"（表示用に対象名を出したいなら map してもOK）
-            who = self.player.name if k == "player" else self.enemy.name
-            self.logger(f"⚪️ {who} の {name} が切れた")
-            del buffs[name]
+    def _decrement_temp_buffs(self):
+        for k, buffs in self.temp_buffs.items():
+            expired = []
+            for name, info in list(buffs.items()):
+                info["duration"] -= 1
+                if info["duration"] <= 0:
+                    expired.append(name)
+            for name in expired:
+                who = self.player.name if k == "player" else self.enemy.name
+                self.logger(f"⚪️ {who} の {name} が切れた")
+                del buffs[name]
 
-
-    # ========= ユーティリティ =========
-
+    # ========= ユーティリティ（BattleDeck前提） =========
     def _draw_player_to(self, n: int):
         need = max(0, n - len(self.pdeck.hand))
         if need > 0:
@@ -212,26 +177,18 @@ def _decrement_temp_buffs(self):
         if need > 0:
             self._draw(self.edeck, need)
 
-    def _draw(self, deck, n: int):
-        if hasattr(deck, "draw"):
-            deck.draw(n)
-        elif hasattr(deck, "draw_cards"):
-            deck.draw_cards(n)
-        else:
-            for _ in range(n):
-                if getattr(deck, "draw_pile", []):
-                    deck.hand.append(deck.draw_pile.pop(0))
+    @staticmethod
+    def _draw(deck: BattleDeck, n: int):
+        deck.draw(n)
 
-    def _discard(self, deck, card):
-        if hasattr(deck, "discard"):
-            deck.discard(card)
-        elif hasattr(deck, "discard_pile"):
-            deck.discard_pile.append(card)
+    @staticmethod
+    def _discard(deck: BattleDeck, card: CardInstance):
+        deck.discard(card)
 
-    def _effective_cost(self, actor, card) -> int:
+    def _effective_cost(self, actor, card: CardInstance) -> int:
         base = getattr(card, "cost", 0)
-        # 例：将来、足軽カードのコスト-1等をここで適用
-        return base
+        # v1.10：コスト補正なし（H4などは未実装）
+        return max(0, base)
 
     @staticmethod
     def _find_first_by_type(hand: list, ctype: str) -> Optional[int]:

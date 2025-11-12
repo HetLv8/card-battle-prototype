@@ -1,4 +1,4 @@
-# model.py
+#model.py
 #Dataclass
 #Actor/Player/Enemy/CardInstance
 

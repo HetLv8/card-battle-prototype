@@ -17,13 +17,9 @@ def make_starter_deck(faction: str) -> List[CardInstance]:
     f = faction.upper()
     if f == "HIDEYOSHI":
         ids = (
-            ["HIDEYOSHI_COMMAND"] * 1 +
-            ["MAEDA_COUNTERSTANCE"] * 1 +
-            ["HIDENAGA_WALL"] * 1 +
-            ["KANBEI_FORTIFY"] * 1 +
-            ["SPEAR_DEFENSE"] * 3 +
-            ["SPEAR_COUNTER"] * 2 +
-            ["SPEAR_GUARD_POSTURE"] * 1
+            ["H2"] +
+            ["S1"] * 3 +
+            ["S2"] * 2    
         )
         return [make_card(i) for i in ids]
     raise ValueError(f"unknown faction: {f}")
