@@ -13,7 +13,7 @@ from starter_decks import make_starter_deck
 class BattleApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("ミニマムUI")
+        self.title("プロトタイプUI")
         self.geometry("720x480")
 
         self.bm: BattleManager | None = None

@@ -3,14 +3,17 @@
 #Actor/Player/Enemy/CardInstance
 
 from dataclasses import dataclass, field
-from typing import List, Dict
+from typing import List, Literal
 
 @dataclass
 class Actor:
-    name: str
-    max_hp: int
-    hp: int = None
-    block: int = 0
+    def __init__(self, name: str, max_hp: int):
+        self.name = name
+        self.max_hp = max_hp
+        self.hp = max_hp
+        self.block = 0
+        self.buffs: List[Buff] = []
+
     energy: int = 3
 
     def __post_init__(self):
@@ -48,3 +51,21 @@ class CardInstance:
 
     def play_text(self) -> str:
         return f"{self.card_type}:{self.power}"
+
+
+BuffTrigger = Literal["turn_start", "turn_end", "on_card_play", "on_attack_calc", "on_hit"]
+
+
+@dataclass
+class Buff:
+    """
+    すべてのバフ/デバフ/陣形を一元管理するためのモデル。
+    - kind   : バフID（"WEAK" / "COUNTER" / "FORM_SHIELDWALL" など）
+    - power  : 効果の強さ（Block量・反撃量・弱体段数など）
+    - turns  : 残りターン数（0以下になったら消滅）
+    - trigger: どのタイミングで評価するか
+    """
+    kind: str
+    power: int
+    turns: int
+    trigger: BuffTrigger

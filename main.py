@@ -1,70 +1,74 @@
 # main.py
-import random
+
 from model import Player, Enemy
 from battle import BattleManager
 from battle_deck import BattleDeck
 from master_deck import MasterDeck
 from starter_decks import make_starter_deck
 
-def show_state(bm: BattleManager):
+
+def show_state(bm: BattleManager) -> None:
     p, e = bm.player, bm.enemy
     print(f"\n=== 🧭 ターン {bm.turn} ===")
     print(f"👤 {p.name} HP {p.hp}/{p.max_hp} | Block {p.block} | Energy {p.energy}")
     print(f"💀 {e.name} HP {e.hp}/{e.max_hp} | Block {e.block}")
 
-def show_hand(deck: BattleDeck):
+
+def show_hand(deck: BattleDeck) -> None:
     for i, c in enumerate(deck.hand):
-        name = getattr(c, "spec_id", getattr(c, "name", "?"))
-        print(f"[{i}] {name} (type:{c.card_type}, cost:{c.cost}, val:{c.power})")
+        print(f"{i}: {c.spec_id} ({c.card_type}) cost={c.cost} pow={c.power}")
 
-def main():
-    random.seed(42)
 
-    # === ゲーム開始：MasterDeck を作成 ===
-    starter_cards = make_starter_deck("HIDEYOSHI")
-    starter_ids = [c.spec_id for c in starter_cards]
-    master = MasterDeck(starter_ids)
+def main() -> None:
+    # --- プレイヤー／敵 ---
+    player = Player(name="織田信長", max_hp=60)
+    enemy = Enemy(name="明智光秀", max_hp=50)
 
-    # === 戦闘開始：MasterDeck → BattleDeck 実体化 ===
-    player = Player("羽柴隊", max_hp=40)
-    enemy = Enemy("明智兵", max_hp=35)
-    pdeck = BattleDeck(master.instantiate())
-    edeck = BattleDeck([])  # v1.10は敵は簡易AIで山札未使用でもOK
+    # --- デッキ準備 ---
+    mdeck = MasterDeck()
+    # とりあえず HIDEYOSHI スターターを流用（中身は適宜 S1〜S32 に差し替えてOK）
+    starter_ids = make_starter_deck("HIDEYOSHI")
+
+    pdeck = BattleDeck(starter_ids)
+    edeck = BattleDeck(starter_ids)  # テスト用に同じデッキを敵にも
 
     bm = BattleManager(player, enemy, pdeck, edeck, max_energy=3, hand_size=5)
     bm.start_battle()
-    show_state(bm)
 
+    # --- メインループ ---
     while True:
+        # プレイヤーターン
         bm.start_turn()
         show_state(bm)
+        show_hand(bm.pdeck)
 
-        # === プレイヤーターン ===
         while True:
-            show_hand(pdeck)
-            cmd = input("番号（endで終了）：").strip().lower()
-            if cmd in ("end", "e"):
+            cmd = input("番号でカードを選択 / end でターン終了 > ").strip()
+            if cmd == "end":
                 break
             try:
                 idx = int(cmd)
                 log = bm.play_player_card(idx)
                 print(log)
                 show_state(bm)
-                over,msg = bm.is_battle_over()
+                over, msg = bm.is_battle_over()
                 if over:
                     print(msg)
-                    break
+                    return
             except ValueError:
                 print("⚠ 入力エラー（番号 or end）")
+
         bm.end_turn()
 
-        # === 敵ターン ===
-        print(bm.enemy_act())
+        # 敵ターン
+        log = bm.enemy_act()
+        print(log)
         show_state(bm)
         over, msg = bm.is_battle_over()
         if over:
             print(msg)
-            break
+            return
+
 
 if __name__ == "__main__":
     main()
